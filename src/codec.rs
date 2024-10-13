@@ -1,22 +1,41 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-type Encoder = BTreeMap<char, u16>;
-type Decoder = BTreeMap<u16, char>;
+pub(crate) const CONTROL: char = '\u{0000}';
+pub(crate) const DOT_CONTROL: char = '.';
 
-struct Codec<'a> {
-    source: &'a Vec<char>,
+pub(crate) type Encoder = BTreeMap<char, u16>;
+pub(crate) type Decoder = BTreeMap<u16, char>;
+
+pub(crate) struct Codec {
+    encoder: Encoder,
+    decoder: Decoder,
 }
 
-impl<'a> Codec<'a> {
-    fn build(&self) -> (Encoder, Decoder) {
+impl Codec {
+    pub fn new(source: &Vec<Vec<char>>) -> Self {
         let mut encoder = Encoder::new();
         let mut decoder = Decoder::new();
 
-        for (i, c) in self.source.iter().enumerate() {
-            encoder.insert(*c, i as u16);
-            decoder.insert(i as u16, *c);
+        let vocabulary = BTreeSet::from_iter(source.iter().flatten());
+
+        for (i, c) in vocabulary.into_iter().enumerate() {
+            encoder.insert(*c, (i + 1) as u16);
+            decoder.insert((i + 1) as u16, *c);
         }
 
-        (encoder, decoder)
+        encoder.insert(DOT_CONTROL, 0);
+        decoder.insert(0, DOT_CONTROL);
+
+        Self { encoder, decoder }
+    }
+
+    pub fn encode(&self, c: &char) -> usize {
+        // FIXME(jdb): remove unwrap
+        (*self.encoder.get(c).unwrap()).into()
+    }
+
+    pub fn decode(&self, i: u16) -> char {
+        // FIXME(jdb): Remove unwrap
+        *self.decoder.get(&i).unwrap()
     }
 }

@@ -1,3 +1,6 @@
+use rand::{distributions::WeightedIndex, prelude::*, Rng};
+
+use crate::codec::{Codec, Decoder, Encoder, CONTROL, DOT_CONTROL};
 use std::collections::BTreeMap;
 
 const NAMES_DATASET: &str = include_str!("../makemore/names.txt");
@@ -6,62 +9,83 @@ type BigramPair = (char, char);
 
 struct Bigram<'a> {
     dataset: &'a Vec<Vec<char>>,
-    pub(crate) bigram: BTreeMap<BigramPair, usize>,
-    N: [[u32; 28]; 28],
+    pub(crate) N: [[u32; 28]; 28],
+    codec: Codec,
 }
-
-const SEQ_START: char = '\u{0000}';
-const SEQ_END: char = '\u{ffff}';
 
 impl<'a> Bigram<'a> {
     fn new(dataset: &'a Vec<Vec<char>>) -> Self {
-        // Represents our count matrix. It's 26 characters of the alphabet
-        // plus the two control characters \u0000 and \uffff.
-        let N = [[0; 28]; 28];
-
         Self {
             dataset,
-            bigram: BTreeMap::new(),
-            N,
+            N: [[0; 28]; 28],
+            codec: Codec::new(dataset),
         }
     }
 
     /// Computes the bigram map
     fn compute(&mut self) {
-        let seq_start = [SEQ_START];
-        let seq_end = [SEQ_END];
+        for name in self.dataset.iter() {
+            let control = [DOT_CONTROL];
 
-        for word in self.dataset.iter() {
-            let chars = seq_start.iter().chain(word.iter()).chain(seq_end.iter());
+            let chars = control.iter().chain(name.iter()).chain(control.iter());
 
             // FIXME(jdb): remove clone
             for (ch1, ch2) in chars.clone().zip(chars.skip(1)) {
-                let bigram = (*ch1, *ch2);
+                // Compute `N` matrix
+                let i_ch1 = self.codec.encode(ch1);
+                let i_ch2 = self.codec.encode(ch2);
 
-                let count = self.bigram.get(&bigram).unwrap_or(&0) + 1;
-                self.bigram.insert(bigram, count);
+                self.N[i_ch1][i_ch2] += 1
             }
         }
     }
 
-    fn 
+    fn sample(&self) -> Vec<char> {
+        let mut out = vec![];
+        let mut rng = rand::thread_rng();
+
+        let mut sample = 0;
+
+        loop {
+            let probabilities: Vec<f32> = self.N[sample][..]
+                .iter()
+                .map(|count| f32::from_bits(*count))
+                .collect();
+
+            let probabilities_sum: f32 = probabilities.iter().sum();
+
+            let normalised: Vec<f32> = probabilities
+                .iter()
+                .map(|p| p / probabilities_sum)
+                .collect();
+
+            let dist = WeightedIndex::new(&normalised).unwrap();
+            sample = dist.sample(&mut rng);
+
+            if sample == 0 {
+                break;
+            }
+
+            out.push(self.codec.decode(sample as u16));
+        }
+
+        out
+    }
 }
 
 mod tests {
     use super::*;
 
     #[test]
-    fn test_sliding() {
+    fn test() {
         let dataset: Vec<Vec<char>> = NAMES_DATASET
             .split("\n")
-            .map(|w| w.chars().collect())
+            .map(|name| name.chars().collect())
             .collect();
 
         let mut bigram = Bigram::new(&dataset);
         bigram.compute();
 
-        for (k, v) in bigram.bigram.iter() {
-            println!("{k:?}: {v:?}");
-        }
+        println!("name: {:?}", bigram.sample());
     }
 }

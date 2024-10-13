@@ -2,10 +2,12 @@ mod bigram;
 mod codec;
 
 use std::{
+    borrow::Borrow,
     collections::{BTreeMap, BTreeSet},
     sync::RwLock,
 };
 
+use codec::Codec;
 use rand::{distributions::Uniform, rngs::ThreadRng, Rng};
 
 const TINY_SHAKESPEARE: &str = include_str!("../char-rnn/data/tinyshakespeare/input.txt");
@@ -22,34 +24,35 @@ type Decoder = BTreeMap<u16, char>;
 type Tensor2D = Vec<Vec<u16>>;
 
 fn main() {
-    let mut chars = BTreeSet::new();
+    let chars = TINY_SHAKESPEARE.chars();
+    let mut vocabulary = BTreeSet::new();
 
-    for c in TINY_SHAKESPEARE.chars() {
-        chars.insert(c);
+    for c in chars {
+        vocabulary.insert(c);
     }
 
-    println!("Vocab size:\t{}", chars.len());
-    println!("Vocabulary:\t{chars:?}");
+    println!("Vocab size:\t{}", vocabulary.len());
+    println!("Vocabulary:\t{vocabulary:?}");
 
-    let mut encoder = BTreeMap::new();
-    let mut decoder = BTreeMap::new();
+    // FIXME(jdb): Consolidate this mess
+    let codec_source = &TINY_SHAKESPEARE
+        .split("\n")
+        .map(|sentence| sentence.chars().collect())
+        .collect();
 
-    for (i, c) in chars.iter().enumerate() {
-        encoder.insert(*c, i as u16);
-        decoder.insert(i as u16, *c);
-    }
+    let codec = Codec::new(codec_source);
 
-    let data = encode_source(&encoder);
+    //let data = TINY_SHAKESPEARE;
 
-    println!("encoded data: {:?}", &data[..10]);
+    //println!("encoded data: {:?}", &data[..10]);
 
-    let split_at = (0.9 * data.len() as f32) as usize;
-    let training_data = &data[..split_at];
-    let validate_data = &data[split_at..];
+    //let split_at = (0.9 * data.len() as f32) as usize;
+    //let training_data = &data[..split_at];
+    //let validate_data = &data[split_at..];
 
-    println!("train_data: {:?}", &training_data[..=BLOCK_SIZE]);
+    //println!("train_data: {:?}", &training_data[..=BLOCK_SIZE]);
 
-    let (x_batch, y_batch) = get_batch(training_data);
+    //let (x_batch, y_batch) = get_batch(training_data);
 }
 
 fn get_batch(dataset: &[u16]) -> (Tensor2D, Tensor2D) {
