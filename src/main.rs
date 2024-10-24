@@ -1,5 +1,6 @@
 mod bigram;
 mod codec;
+mod util;
 
 use std::{
     borrow::Borrow,

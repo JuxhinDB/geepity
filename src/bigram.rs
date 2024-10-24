@@ -1,18 +1,23 @@
 use rand::{distributions::WeightedIndex, prelude::*, Rng};
 
-use crate::codec::{Codec, Decoder, Encoder, CONTROL, DOT_CONTROL};
-use std::collections::BTreeMap;
-
+use crate::{
+    codec::{Codec, Decoder, Encoder, CONTROL, DOT_CONTROL},
+    util::{one_hot, vec_to_bounded_slice},
+};
 const NAMES_DATASET: &str = include_str!("../makemore/names.txt");
 const N_DIMS: usize = 28; // Length of our vocabulary, referenced in multiple places
 
 type BigramPair = (char, char);
 
+type Dataset = (Vec<Vec<f32>>, Vec<Vec<f32>>); // Maps to inputs and targets/labels
+
 struct Bigram<'a> {
     dataset: &'a Vec<Vec<char>>,
     pub(crate) N: [[u32; N_DIMS]; N_DIMS],
     P: [[f32; N_DIMS]; N_DIMS], // Matrix of normalised probabilities
-    nll: f32,  // The normalised, negative log likelihood of the model 
+    nll: f32,                   // The normalised, negative log likelihood of the model
+    training: Dataset,
+    testing: Dataset,
     codec: Codec,
 }
 
@@ -23,13 +28,15 @@ impl<'a> Bigram<'a> {
             N: [[1; N_DIMS]; N_DIMS],
             P: [[0.0; N_DIMS]; N_DIMS],
             nll: 0.0,
+            training: (Vec::new(), Vec::new()),
+            testing: (Vec::new(), Vec::new()),
             codec: Codec::new(dataset),
         }
     }
 
     /// Computes the bigram map
     fn compute(&mut self) {
-        for name in self.dataset.iter() {
+        for name in self.dataset.iter().take(1) {
             let control = [DOT_CONTROL];
 
             let chars = control.iter().chain(name.iter()).chain(control.iter());
@@ -40,7 +47,8 @@ impl<'a> Bigram<'a> {
                 let i_ch1 = self.codec.encode(ch1);
                 let i_ch2 = self.codec.encode(ch2);
 
-                self.N[i_ch1][i_ch2] += 1;
+                self.training.0.push(one_hot::<N_DIMS>(i_ch1));
+                self.training.1.push(one_hot::<N_DIMS>(i_ch2));
             }
         }
 
@@ -68,14 +76,14 @@ impl<'a> Bigram<'a> {
                 .iter()
                 .map(|cell| f32::from_bits(*cell) / row_sums.get(i).unwrap())
                 .collect::<Vec<f32>>();
-            self.P[i] = Self::vec_to_bounded_slice(normalised_row);
-        } 
+            self.P[i] = vec_to_bounded_slice(normalised_row);
+        }
 
         // Calculate the model's performance, i.e., calculating the normalised
-        // negative log probability of the model. 
+        // negative log probability of the model.
         let mut log_likelihood = 0.0;
         let mut n = 0;
-        for name in [['a', 'n', 'd', 'r', 'e', 'j', 'q']] {
+        for name in self.dataset.iter() {
             let control = [DOT_CONTROL];
             let chars = control.iter().chain(name.iter()).chain(control.iter());
 
@@ -90,18 +98,12 @@ impl<'a> Bigram<'a> {
                 // calculating the log, we can leverage log properties and
                 // simply sum all ln(probabilities).
                 log_likelihood += prob.ln();
-                n += 1;  // Used to normalise the final number
+                n += 1; // Used to normalise the final number
             }
         }
 
         log_likelihood = log_likelihood.abs() / n as f32;
         self.nll = log_likelihood;
-    }
-
-    fn vec_to_bounded_slice<T, const N: usize>(v: Vec<T>) -> [T; N] {
-        v.try_into().unwrap_or_else(|v: Vec<T>| {
-            panic!("Expected a Vec of length {} but it was {}", N, v.len())
-        })
     }
 
     fn sample(&self) -> Vec<char> {
