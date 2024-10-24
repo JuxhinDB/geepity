@@ -11,7 +11,8 @@ type BigramPair = (char, char);
 struct Bigram<'a> {
     dataset: &'a Vec<Vec<char>>,
     pub(crate) N: [[u32; N_DIMS]; N_DIMS],
-    pub(crate) P: [[f32; N_DIMS]; N_DIMS], // Matrix of normalised probabilities
+    P: [[f32; N_DIMS]; N_DIMS], // Matrix of normalised probabilities
+    nll: f32,  // The normalised, negative log likelihood of the model 
     codec: Codec,
 }
 
@@ -19,8 +20,9 @@ impl<'a> Bigram<'a> {
     fn new(dataset: &'a Vec<Vec<char>>) -> Self {
         Self {
             dataset,
-            N: [[0; N_DIMS]; N_DIMS],
+            N: [[1; N_DIMS]; N_DIMS],
             P: [[0.0; N_DIMS]; N_DIMS],
+            nll: 0.0,
             codec: Codec::new(dataset),
         }
     }
@@ -67,7 +69,33 @@ impl<'a> Bigram<'a> {
                 .map(|cell| f32::from_bits(*cell) / row_sums.get(i).unwrap())
                 .collect::<Vec<f32>>();
             self.P[i] = Self::vec_to_bounded_slice(normalised_row);
+        } 
+
+        // Calculate the model's performance, i.e., calculating the normalised
+        // negative log probability of the model. 
+        let mut log_likelihood = 0.0;
+        let mut n = 0;
+        for name in [['a', 'n', 'd', 'r', 'e', 'j', 'q']] {
+            let control = [DOT_CONTROL];
+            let chars = control.iter().chain(name.iter()).chain(control.iter());
+
+            // FIXME(jdb): remove clone
+            for (ch1, ch2) in chars.clone().zip(chars.skip(1)) {
+                let i_ch1 = self.codec.encode(ch1);
+                let i_ch2 = self.codec.encode(ch2);
+
+                let prob = self.P[i_ch1][i_ch2];
+
+                // Rather than computing the product of probabilities, and then
+                // calculating the log, we can leverage log properties and
+                // simply sum all ln(probabilities).
+                log_likelihood += prob.ln();
+                n += 1;  // Used to normalise the final number
+            }
         }
+
+        log_likelihood = log_likelihood.abs() / n as f32;
+        self.nll = log_likelihood;
     }
 
     fn vec_to_bounded_slice<T, const N: usize>(v: Vec<T>) -> [T; N] {
@@ -79,12 +107,10 @@ impl<'a> Bigram<'a> {
     fn sample(&self) -> Vec<char> {
         let mut out = vec![];
         let mut rng = rand::thread_rng();
-
         let mut sample = 0;
 
         loop {
             let row = self.P[sample];
-
             let dist = WeightedIndex::new(&row).unwrap();
             sample = dist.sample(&mut rng);
 
