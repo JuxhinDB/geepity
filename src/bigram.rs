@@ -2,7 +2,7 @@ use rand::{distributions::WeightedIndex, prelude::*, Rng};
 
 use crate::{
     codec::{Codec, Decoder, Encoder, CONTROL, DOT_CONTROL},
-    util::{one_hot, vec_to_bounded_slice},
+    util::{mat_mul, one_hot, square_uniform_matrix, transpose, vec_to_bounded_slice},
 };
 const NAMES_DATASET: &str = include_str!("../makemore/names.txt");
 const N_DIMS: usize = 28; // Length of our vocabulary, referenced in multiple places
@@ -15,6 +15,7 @@ struct Bigram<'a> {
     dataset: &'a Vec<Vec<char>>,
     pub(crate) N: [[u32; N_DIMS]; N_DIMS],
     P: [[f32; N_DIMS]; N_DIMS], // Matrix of normalised probabilities
+    W: [[f32; N_DIMS]; N_DIMS], // Our single layer of neurons
     nll: f32,                   // The normalised, negative log likelihood of the model
     training: Dataset,
     testing: Dataset,
@@ -27,6 +28,7 @@ impl<'a> Bigram<'a> {
             dataset,
             N: [[1; N_DIMS]; N_DIMS],
             P: [[0.0; N_DIMS]; N_DIMS],
+            W: square_uniform_matrix(),
             nll: 0.0,
             training: (Vec::new(), Vec::new()),
             testing: (Vec::new(), Vec::new()),
@@ -50,6 +52,20 @@ impl<'a> Bigram<'a> {
                 self.training.0.push(one_hot::<N_DIMS>(i_ch1));
                 self.training.1.push(one_hot::<N_DIMS>(i_ch2));
             }
+        }
+
+        let a = vec_to_bounded_slice::<[f32; N_DIMS], 5>(
+            self.training
+                .0
+                .iter()
+                .cloned()
+                .map(vec_to_bounded_slice::<f32, N_DIMS>)
+                .collect(),
+        );
+
+        let mul = mat_mul(a, transpose(self.W));
+        for row in mul {
+            println!("{row:?}\n");
         }
 
         // We need to compute row-rise sums and produce a single (N_DIMS , 1) tensor
