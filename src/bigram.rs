@@ -2,7 +2,7 @@ use rand::{distributions::WeightedIndex, prelude::*, Rng};
 
 use crate::{
     codec::{Codec, Decoder, Encoder, CONTROL, DOT_CONTROL},
-    util::{mat_mul, one_hot, square_uniform_matrix, transpose, vec_to_bounded_slice},
+    util::{exponentiate, mat_mul, normalize, one_hot, square_uniform_probability_matrix, transpose, vec_to_bounded_slice},
 };
 const NAMES_DATASET: &str = include_str!("../makemore/names.txt");
 const N_DIMS: usize = 28; // Length of our vocabulary, referenced in multiple places
@@ -13,12 +13,13 @@ type Dataset = (Vec<Vec<f32>>, Vec<Vec<f32>>); // Maps to inputs and targets/lab
 
 struct Bigram<'a> {
     dataset: &'a Vec<Vec<char>>,
-    pub(crate) N: [[u32; N_DIMS]; N_DIMS],
     P: [[f32; N_DIMS]; N_DIMS], // Matrix of normalised probabilities
     W: [[f32; N_DIMS]; N_DIMS], // Our single layer of neurons
     nll: f32,                   // The normalised, negative log likelihood of the model
     training: Dataset,
     testing: Dataset,
+    xs: Vec<usize>, // Temporary
+    ys: Vec<usize>, // Temporary
     codec: Codec,
 }
 
@@ -26,12 +27,13 @@ impl<'a> Bigram<'a> {
     fn new(dataset: &'a Vec<Vec<char>>) -> Self {
         Self {
             dataset,
-            N: [[1; N_DIMS]; N_DIMS],
             P: [[0.0; N_DIMS]; N_DIMS],
-            W: square_uniform_matrix(),
+            W: square_uniform_probability_matrix(),
             nll: 0.0,
             training: (Vec::new(), Vec::new()),
             testing: (Vec::new(), Vec::new()),
+            xs: Vec::new(),
+            ys: Vec::new(),
             codec: Codec::new(dataset),
         }
     }
@@ -51,6 +53,9 @@ impl<'a> Bigram<'a> {
 
                 self.training.0.push(one_hot::<N_DIMS>(i_ch1));
                 self.training.1.push(one_hot::<N_DIMS>(i_ch2));
+
+                self.xs.push(i_ch1);
+                self.ys.push(i_ch2);
             }
         }
 
@@ -63,63 +68,29 @@ impl<'a> Bigram<'a> {
                 .collect(),
         );
 
-        let mul = mat_mul(a, transpose(self.W));
-        for row in mul {
-            println!("{row:?}\n");
-        }
-
-        // We need to compute row-rise sums and produce a single (N_DIMS , 1) tensor
-        //
-        // Now since our `P` matrix is (N_DIMS, N_DIMS) shape, we need to align the
-        // `row_sums` to match that in order to normalise our values. In pytorch, this
-        // is done automatically as part of broadcasting rules. Here we implement it
-        // directly.
-        let row_sums: Vec<f32> = self
-            .N
-            .iter()
-            .map(|r| f32::from_bits(r.into_iter().sum()))
-            .collect();
-
-        // We want to compute the probabilities once, and reference into them
-        // rather than normalising them each time.
-        //
-        // NOTE(juxhin): These normalised rows are f32s, and therefore lose some
-        // precision. Many times resulting in 0.999993 or 1.000001. Also since we
-        // have our control char on 28th dimension that is never used, that results
-        // in a NaN.
-        for i in 0..N_DIMS {
-            let normalised_row = self.N[i]
-                .iter()
-                .map(|cell| f32::from_bits(*cell) / row_sums.get(i).unwrap())
-                .collect::<Vec<f32>>();
-            self.P[i] = vec_to_bounded_slice(normalised_row);
-        }
+        // Our list of probabilities for each input
+        let mut P = mat_mul(a, transpose(self.W));
+        exponentiate(&mut P);
+        normalize(&mut P);
 
         // Calculate the model's performance, i.e., calculating the normalised
         // negative log probability of the model.
         let mut log_likelihood = 0.0;
         let mut n = 0;
-        for name in self.dataset.iter() {
-            let control = [DOT_CONTROL];
-            let chars = control.iter().chain(name.iter()).chain(control.iter());
-
-            // FIXME(jdb): remove clone
-            for (ch1, ch2) in chars.clone().zip(chars.skip(1)) {
-                let i_ch1 = self.codec.encode(ch1);
-                let i_ch2 = self.codec.encode(ch2);
-
-                let prob = self.P[i_ch1][i_ch2];
-
-                // Rather than computing the product of probabilities, and then
-                // calculating the log, we can leverage log properties and
-                // simply sum all ln(probabilities).
-                log_likelihood += prob.ln();
-                n += 1; // Used to normalise the final number
-            }
+        let mut nlls = vec![];
+        for i in 0..5 {
+            let x = self.xs[i];
+            let y = self.ys[i];
+            let prob = P[i][y];
+            println!("probability: {prob:.4}");
+            let ll = prob.ln();
+            let nll = ll.abs();
+            println!("nll: {nll:.4}");
+            nlls.push(nll);
         }
 
-        log_likelihood = log_likelihood.abs() / n as f32;
-        self.nll = log_likelihood;
+        let nll_sum = nlls.iter().sum::<f32>();
+        println!("average nll: {:.4?}", nll_sum / nlls.len() as f32);
     }
 
     fn sample(&self) -> Vec<char> {

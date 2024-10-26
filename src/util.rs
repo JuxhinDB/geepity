@@ -11,10 +11,8 @@ pub(crate) fn vec_to_bounded_slice<T, const N: usize>(v: Vec<T>) -> [T; N] {
         .unwrap_or_else(|v: Vec<T>| panic!("Expected a Vec of length {} but it was {}", N, v.len()))
 }
 
-/// Generates an [N, N] matrix with values sampled from the uniform distribution
-///
-/// In our case this is meant to be equivalent to `torch.rand`
-pub(crate) fn square_uniform_matrix<const N: usize>() -> [[f32; N]; N] {
+/// Generates an [N, N] matrix with values sampled from the uniform distribution.
+pub(crate) fn square_uniform_probability_matrix<const N: usize>() -> [[f32; N]; N] {
     let mut rng = rand::thread_rng();
 
     // NOTE(juxhin): This distribution isn't exactly right.. values can be
@@ -27,7 +25,11 @@ pub(crate) fn square_uniform_matrix<const N: usize>() -> [[f32; N]; N] {
     for (i, _) in matrix.into_iter().enumerate() {
         // NOTE(juxhin): Explore unsafe alternative here to cast Vec<f32> to
         // [f32; N] as we are able to guarantee the bounds
-        let sample = distribution.sample_iter(&mut rng).take(N).collect();
+        //
+        // This not only fetches a sample, but exponentiates it and normalises
+        // it. The benefit here is that we already know the length/sum as `N`, 
+        // and therefore do not need to compute the length.
+        let sample: Vec<f32> = distribution.sample_iter(&mut rng).take(N).collect();
         matrix[i] = vec_to_bounded_slice::<f32, N>(sample);
     }
 
@@ -71,6 +73,19 @@ pub(crate) fn mat_mul<const D1: usize, const D2: usize, const D3: usize, const D
     }
 
     result
+}
+
+pub(crate) fn exponentiate<const D1: usize, const D2: usize>(a: &mut [[f32; D2]; D1]) {
+    for i in 0..D1 {
+        a[i] = vec_to_bounded_slice::<f32, D2>(a[i].iter().map(|v| v.exp()).collect());
+    }
+}
+
+pub(crate) fn normalize<const D1: usize, const D2: usize>(a: &mut [[f32; D2]; D1]) {
+    for i in 0..D1 {
+        let row_sum = a[i].iter().sum::<f32>();
+        a[i] = vec_to_bounded_slice(a[i].iter().map(|v| v / row_sum).collect())
+    }
 }
 
 mod tests {
