@@ -57,17 +57,55 @@ pub(crate) fn transpose<const D1: usize, const D2: usize>(
 /// and `D4`. We can likely simplify this quite a lot. Also this is not
 /// designed to be performant in any way (_yet_).
 pub(crate) fn mat_mul<const D1: usize, const D2: usize, const D3: usize, const D4: usize>(
-    a: [[f32; D1]; D2],
-    b: [[f32; D3]; D4],
-) -> [[f32; D4]; D2] {
-    debug_assert_eq!(D1, D3);
-    let mut result = [[0.0f32; D4]; D2];
+    a: [[f32; D2]; D1],
+    b: [[f32; D4]; D3],
+) -> [[f32; D4]; D1] {
+    debug_assert_eq!(D2, D3);
+    let mut result = [[0.0f32; D4]; D1];
 
-    for i in 0..D2 {
+    for i in 0..D1 {
         for j in 0..D4 {
-            result[i][j] = a[i].iter().zip(b[j].iter()).map(|(a, b)| a * b).sum();
+            let col = b.iter().map(|r| r[j]);
+            result[i][j] = a[i].iter().zip(col).map(|(a, b)| a * b).sum();
         }
     }
 
     result
+}
+
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_transpose() {
+        let a = [
+            [1.0, 2.0, 3.0],
+            [4.0, 5.0, 6.0]
+        ];
+
+        let b = [
+            [1.0, 4.0],
+            [2.0, 5.0],
+            [3.0, 6.0]
+        ];
+
+        assert_eq!(transpose(a), b);
+    }
+
+    #[test]
+    fn test_matmul() {
+        let a = [
+            [1.0, 2.0, 3.0],
+            [4.0, 5.0, 6.0]
+        ];
+
+        let b = transpose(a);
+
+        let result: [[f32; 2]; 2] = [
+            [14.0, 32.0],
+            [32.0, 77.0]
+        ];
+
+        assert_eq!(mat_mul::<2, 3, 3, 2>(a, b), result);
+    }
 }
